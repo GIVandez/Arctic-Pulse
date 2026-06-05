@@ -10,6 +10,7 @@ volumes:
 services:
   postgres:
     image: postgres:17-alpine
+    container_name: db
     restart: unless-stopped
     ports:
       - "${POSTGRES_PORT}:5432"
@@ -40,7 +41,7 @@ services:
       KEY: ${DIRECTUS_KEY}
       SECRET: ${DIRECTUS_SECRET}
       DB_CLIENT: "pg"
-      DB_HOST: "${POSTGRES_HOST}"
+      DB_HOST: "postgres"
       DB_PORT: "${POSTGRES_PORT}"
       DB_DATABASE: ${DB_NAME}
       DB_USER: ${DB_USER}
