@@ -6,6 +6,8 @@ CREATE TABLE sources(
     -- Рейтинг новостного источника (основан на лайках/дизлайках соотв. новостей)
     -- от нуля до 100
     rating DECIMAL(5, 2) DEFAULT 0 CHECK (rating >= 0 AND rating <= 100),
+    likes_count INT DEFAULT 0,
+    dislikes_count INT DEFAULT 0,
     website_url TEXT NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     last_fetched TIMESTAMPTZ DEFAULT NOW(),
@@ -233,3 +235,14 @@ CREATE TABLE daily_system_stats (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Для хранения коэффициентов при подсчете Байессовского рейтинга для репутации источника
+CREATE TABLE system_settings (
+    key TEXT PRIMARY KEY,
+    value NUMERIC NOT NULL
+);
+
+INSERT INTO system_settings(key, value)
+VALUES
+('prior_likes', 7),
+('prior_votes', 10);
