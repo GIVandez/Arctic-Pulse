@@ -80,6 +80,7 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
     environment:
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
       # Basic auth
       N8N_BASIC_AUTH_ACTIVE: true
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
@@ -89,7 +90,7 @@ services:
       N8N_PORT: ${N8N_PORT}
       N8N_PROTOCOL: ${N8N_PROTOCOL}
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE}
-      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      WEBHOOK_URL: "http://localhost:5678/"
       # db
       DB_TYPE: "postgresdb"
       DB_POSTGRESDB_HOST: ${POSTGRES_HOST}
@@ -101,14 +102,15 @@ services:
       postgres:
         condition: service_healthy
 
-  # Сервис для однократного импорта workflow при запуске
+  # Исправленный сервис для автоматического импорта без использования sh/bash
   n8n-migrate:
     image: n8nio/n8n:1.123.51
     container_name: n8n-migrate
     networks:
       - news-network
     volumes:
-      - ./n8n/workflows:/workflows:ro
+      # Монтируем конкретный файл напрямую на место, где n8n сможет его прочитать
+      - ./n8n/workflows/main.json:/home/node/main.json:ro
     environment:
       DB_TYPE: "postgresdb"
       DB_POSTGRESDB_HOST: ${POSTGRES_HOST}
@@ -116,29 +118,13 @@ services:
       DB_POSTGRESDB_DATABASE: ${DB_NAME}
       DB_POSTGRESDB_USER: ${DB_USER}
       DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD}
-    entrypoint: ["/bin/sh"]
-    command: >
-      -c "
-      echo '=== Workflow Migration Service ===' &&
-      echo 'Waiting for database...' &&
-      sleep 10 &&
-      if [ -d /workflows ]; then
-        echo 'Found workflows directory' &&
-        ls -la /workflows/ &&
-        for f in /workflows/*.json; do
-          if [ -f \"$$f\" ]; then
-            echo 'Importing:' $$(basename \"$$f\") &&
-            n8n import:workflow --separate --input=\"$$f\"
-          fi
-        done
-      else
-        echo 'No workflows directory found'
-      fi &&
-      echo 'Migration completed'"
+    # Вызываем напрямую исполняемый файл n8n без промежуточных командных оболочек
+    entrypoint: ["n8n", "import:workflow", "--input=/home/node/main.json"]
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
+
 
 
   frontend:

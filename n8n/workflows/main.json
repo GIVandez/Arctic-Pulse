@@ -1,0 +1,2033 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "={{ $json.rss_url }}",
+        "options": {
+          "ignoreSSL": true
+        }
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -1296,
+        896
+      ],
+      "id": "6f36b56d-c0f0-4327-ac60-893c2a0dcbdc",
+      "name": "RSS Read",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1888,
+        400
+      ],
+      "id": "755346c9-8fc1-486e-ac3d-dd747b94f7ce",
+      "name": "Запускаем каждый час"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "collection": "sources",
+        "itemFields": [
+          "id",
+          "rss_url",
+          "website_url",
+          "is_active"
+        ],
+        "returnAll": true
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        -1696,
+        400
+      ],
+      "id": "fedc4bbe-6992-41db-b0bb-74cde072fd63",
+      "name": "Получаем и передаем ссылки сайтов",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawOutput = $input.first().json.output;\n\nlet aiOutput;\n\ntry {\n  if (typeof rawOutput === 'object' && rawOutput !== null) {\n    aiOutput = rawOutput;\n  } else {\n    let cleaned = String(rawOutput).trim();\n\n    // Если модель всё же вернула ```json\n    cleaned = cleaned\n      .replace(/^```json\\s*/i, '')\n      .replace(/^```\\s*/i, '')\n      .replace(/\\s*```$/i, '');\n\n    const jsonMatch = cleaned.match(/\\{[\\s\\S]*\\}/);\n\n    if (!jsonMatch) {\n      throw new Error('JSON не найден в ответе');\n    }\n\n    aiOutput = JSON.parse(jsonMatch[0]);\n  }\n} catch (e) {\n  // При ошибке возвращаем заполненные данные, чтобы не было пустых значений\n  return [{\n    json: {\n      is_arctic: false,\n      has_matches: false,\n      relevance_score: \"0.00\", // Форматируем дефолт под DECIMAL(5,2)\n      news_data: {\n        summary: 'Failed to parse AI response',\n      },\n      matched_tags: [],\n      parse_error: e.message,\n      raw_output: typeof rawOutput === 'string' ? rawOutput.slice(0, 1000) : JSON.stringify(rawOutput)\n    }\n  }];\n}\n\nconst newsData = aiOutput.news_data || {};\nconst meta = aiOutput.meta || {};\n\n// Функция для безопасного получения значения с дефолтом\nfunction safeValue(value, defaultValue = '') {\n  if (value === null || value === undefined || value === '') {\n    return defaultValue;\n  }\n  return value;\n}\n\n// Функция для безопасной даты\nfunction safeDate(value) {\n  if (!value || value === '') {\n    return new Date().toISOString(); // Текущая дата вместо пустой строки\n  }\n  \n  // Проверяем, является ли строка валидной датой\n  const date = new Date(value);\n  if (isNaN(date.getTime())) {\n    return new Date().toISOString();\n  }\n  \n  return date.toISOString();\n}\n\n// Функция для валидации и форматирования relevance_score под DECIMAL(5, 2)\nfunction formatRelevanceScore(score) {\n  const parsed = parseFloat(score);\n  // Если не число или вне диапазона, возвращаем \"0.00\"\n  if (isNaN(parsed) || parsed < 0 || parsed > 100) {\n    return \"0.00\";\n  }\n  return parsed.toFixed(2); // Возвращает строку вида \"57.00\"\n}\n\nreturn [{\n  json: {\n    is_arctic: aiOutput.is_arctic === true,\n    has_matches: aiOutput.has_matches === true,\n    \n    // Новое отформатированное поле score под DECIMAL(5, 2)\n    relevance_score: formatRelevanceScore(aiOutput.relevance_score),\n    \n    // Гарантируем непустую дату\n    pub_date: safeDate(meta.publication_date),\n\n    news_data: {      \n      // Гарантируем непустой дайджест\n      summary: safeValue(newsData.summary, 'No summary available'),\n    },\n    \n    matched_tags: Array.isArray(aiOutput.matched_tags) ? aiOutput.matched_tags : []\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        416
+      ],
+      "id": "1e864115-2212-402d-8299-db1d075f5687",
+      "name": "Превращаем ответ ai агента в JSON объект"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -944,
+        384
+      ],
+      "id": "0f8c16df-fb17-4f4c-b654-7d8617e7513d",
+      "name": "Для каждой новости"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1344,
+        400
+      ],
+      "id": "4047c1b9-4659-4aae-86c8-c48f33f52999",
+      "name": "Для каждой ссылки ресурса"
+    },
+    {
+      "parameters": {
+        "operation": "getAllRaw",
+        "collection": "news",
+        "queryParameters": "={{ $json.q }}"
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        400
+      ],
+      "id": "15de3be9-0c6c-4a72-942d-1492f23815a4",
+      "name": "Ищем по ссылке, есть ли запись новости",
+      "alwaysOutputData": true,
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b80ad4f4-3a28-40be-a5bd-ba94f8475bc1",
+              "leftValue": "={{ $json.is_duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        400
+      ],
+      "id": "936ce602-4ada-41ff-b19f-c9cdffdc7f22",
+      "name": "Если есть, то возвращаемся назад"
+    },
+    {
+      "parameters": {
+        "jsCode": "const newsId = $('Создаем запись о новости').first().json.id;\nconst matchedTags = $('Превращаем ответ ai агента в JSON объект').first().json.matched_tags;\n\nreturn matchedTags.map(tagId => ({\n  json: {\n    news_id: newsId,\n    tag_id: parseInt(tagId)\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        416
+      ],
+      "id": "7484e663-68b3-4ce8-beda-d78819c89c83",
+      "name": "Code in JavaScript10"
+    },
+    {
+      "parameters": {
+        "collection": "news_tags",
+        "collectionFields": {
+          "fields": {
+            "field": [
+              {
+                "name": "news_id",
+                "value": "={{ $json.news_id }}"
+              },
+              {
+                "name": "tag_id",
+                "value": "={{ $json.tag_id }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        416
+      ],
+      "id": "666ee689-c6b0-4c5f-a032-d562786a1688",
+      "name": "Create an item",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "249e7965-4192-4283-9110-15dabb1ceddf",
+              "leftValue": "={{ $json.has_matches.toBoolean() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "95e05015-d0cb-4367-9b9f-8eb0595e2c5e",
+              "leftValue": "={{ $json.is_arctic.toBoolean() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        848,
+        640
+      ],
+      "id": "81c94a12-255e-437e-87cd-fb0932ad39a6",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "collection": "tags",
+        "itemFields": [
+          "id",
+          "name"
+        ],
+        "returnAll": true
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        0,
+        416
+      ],
+      "id": "8d3ffbc9-48ba-479f-8827-978cebc90a13",
+      "name": "Подучаем и передаем все теги",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем ссылку из originalItem.link\nconst originalLink = $json.originalItem.link;\n\n$json.q = `{\"filter\":{\"news_url\":{\"_contains\":\"${originalLink}\"}},\"limit\":1}`;\n\nreturn [{ json: $json }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        400
+      ],
+      "id": "a2b4adda-49c3-4eee-8bb6-717c0c087cfe",
+      "name": "Code in JavaScript6"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": false,
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -944,
+        896
+      ],
+      "id": "903bc075-9f54-4551-b92e-f55835c9deef",
+      "name": "HTTP Request",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем текущий индекс шага цикла\nconst loopIndex = $node['Для каждой ссылки ресурса'].context.currentRunIndex || 0;\n// Берем массив исходных сайтов из самой первой ноды\nconst sourceNodeData = $('Получаем и передаем ссылки сайтов').all();\n// Вытаскиваем ID и URL именно для текущего шага цикла\nconst sourceId = sourceNodeData[loopIndex]?.json?.id;\nconst sourceUrl = sourceNodeData[loopIndex]?.json?.rss_url;\n// Перебираем все полученные новости из RSS Read3 и добавляем к ним данные сайта\nreturn $input.all().map(item => {\n  return {\n    json: {\n      ...item.json,\n      source_db_id: sourceId,\n      source_url: sourceUrl\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        896
+      ],
+      "id": "eae7ec70-8d77-4ce5-86d4-46dc5d572ab3",
+      "name": "Добавляем id источника"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "poolside/laguna-m.1:free"
+            },
+            {
+              "name": "messages.0.role",
+              "value": "=system"
+            },
+            {
+              "name": "messages.0.content",
+              "value": "={{ $json.systemPrompt }}"
+            },
+            {
+              "name": "messages.1.role",
+              "value": "user"
+            },
+            {
+              "name": "messages.1.content",
+              "value": "={{ $json.userMessage }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        512,
+        416
+      ],
+      "id": "a62aa68b-a997-44b1-90ae-66d5f30f6722",
+      "name": "HTTP Request3",
+      "credentials": {
+        "openRouterApi": {
+          "id": "r7G6TCip8hjHZmW0",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Формируем подробный системный промпт со всеми вашими правилами\nconst systemPrompt = `### КРИТИЧЕСКИЕ ПРАВИЛА ФОРМАТИРОВАНИЯ\n1. Твой ответ — ТОЛЬКО сырой валидный JSON. Без пояснений, без markdown.\n2. Ответ начинается с { и заканчивается }.\n3. Ты должен заполнить абсолютно ВСЕ поля структуры: \"is_arctic\", \"has_matches\", \"relevance_score\", \"news_data\" (с полем \"summary\") и \"matched_tags\". Не урезай ответ и не присылай только часть полей.\n\n### ПРАВИЛА ЗАПОЛНЕНИЯ\n\nis_arctic:\n- true — если новость связана с Арктикой, северными регионами, полярными исследованиями.\n\nhas_matches:\n- true — если новость арктическая И есть хотя бы один подходящий тег.\n- false — если новость не арктическая ИЛИ подходящих тегов нет.\n\nrelevance_score (DECIMAL(5, 2)):\n- Для каждого определенного тобой тега мысленно рассчитай процент соответствия новости от 0.00 до 100.00.\n- Возьми САМЫЙ БОЛЬШОЙ процент среди всех выбранных тегов и запиши его в это поле.\n- Значение должно быть строго в диапазоне от 0.00 до 100.00. Если новость не арктическая, верни 0.00.\n\nnews_data.summary:\n- Для арктических новостей — краткое содержание (СТРОГО до 300 символов).\n- Для неарктических — пустая строка \"\".\n\nmatched_tags:\n- МАССИВ ЧИСЕЛ (ТОЛЬКО ID тегов) из списка ниже.\n- ВАЖНО: возвращай ТОЛЬКО ID, без названий и без объектов.\n- Пример правильного формата: [7, 9]\n- Пример НЕПРАВИЛЬНОГО формата: [{\"id\": 7, \"name\": \"Ecology\"}] или [\"7\", \"9\"]\n- Если has_matches: true — массив НЕ может быть пустым (минимум одно число).\n- Если has_matches: false — массив пустой [].\n\n### ДОСТУПНЫЕ ТЕГИ (ТОЛЬКО ID):\n1 - Politics\n2 - International relations\n3 - Security\n4 - Economics\n5 - Energy\n6 - Infrastructure\n7 - Ecology\n8 - Climate\n9 - Science\n10 - Indigenous peoples\n11 - Shipping\n12 - Industry\n\n### ПРИМЕРЫ ОТВЕТОВ\n\nПРАВИЛЬНЫЙ ответ для арктической научной новости:\n{\n  \"is_arctic\": true,\n  \"has_matches\": true,\n  \"relevance_score\": 57.00,\n  \"news_data\": {\n    \"summary\": \"Итальянские учёные исследуют антибиотикорезистентность в озёрах Исландии.\"\n  },\n  \"matched_tags\": [7, 9]\n}\n\nПРАВИЛЬНЫЙ ответ для неарктической новости:\n{\n  \"is_arctic\": false,\n  \"has_matches\": false,\n  \"relevance_score\": 0.00,\n  \"news_data\": {\n    \"summary\": \"\"\n  },\n  \"matched_tags\": []\n}\n\n### ПРОВЕРЬ СЕБЯ ПЕРЕД ОТВЕТОМ:\n1. matched_tags должен быть массивом ЧИСЕЛ, а не объектов.\n2. Пример: [7, 9] — правильно. [{\"id\": 7}] — НЕПРАВИЛЬНО.\n3. Если новость об экологии или науке в Арктике — используй теги 7 и/или 9.\n4. Не добавляй лишних полей в ответ.`;\n\n// 2. Получаем очищенный контент новости из предыдущего узла\nconst cleanContent = $('Code in JavaScript3').item.json.clean_content;\n\n\n// 3. Собираем список тегов, если они динамически приходят из n8n\nconst tags = $('Подучаем и передаем все теги').all()\n  .map(row => `- ID: ${row.json.id} (Название: ${row.json.name})`)\n  .join('\\n');\n\n// 4. Формируем финальное сообщение для пользователя\nconst userMessage = cleanContent + '\\n\\nДоступные теги:\\n' + tags;\n\n// 5. Замеряем время старта перед отправкой запроса\nconst startTimeMs = Date.now();\n\n// 6. Передаем переменные дальше в HTTP Request\nreturn [{\n  json: {\n    systemPrompt: systemPrompt,\n    userMessage: userMessage,\n    startTimeMs: startTimeMs // Это поле уйдет транзитом\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        416
+      ],
+      "id": "834c37e6-58dd-429f-8cef-983a50183965",
+      "name": "Code in JavaScript8"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Получаем ответ из HTTP Request3\nconst httpRequestItem = $('HTTP Request3').item;\nconst httpResponse = httpRequestItem.json;\n\n// Подстраиваемся под формат (свойство body может присутствовать, если включены заголовки)\nconst dataData = httpResponse.body ? httpResponse.body : httpResponse;\n\n// 2. Извлекаем текстовый ответ модели и очищаем его\nconst rawContent = dataData.choices[0].message.content.trim();\n\n// 3. Извлекаем общее количество потраченных токенов\nconst totalTokens = dataData.usage?.total_tokens || 0;\n\n// 4. Забираем время старта из узла, который стоял ДО HTTP-запроса\n// Замените 'Имя_Вашего_Первого_Узла', если первый узел называется иначе\nconst startTimeMs = $('Code in JavaScript8').item.json.startTimeMs; \nconst endTimeMs = Date.now();\n\nlet durationSec = null;\nif (startTimeMs) {\n  const durationMs = endTimeMs - startTimeMs;\n  durationSec = parseFloat((durationMs / 1000).toFixed(2)); // Секунды с округлением до сотых\n}\n\n// 5. Формируем финальный объект для n8n\nreturn [{\n  json: {\n    output: rawContent,\n    total_tokens: totalTokens,\n    execution_time_seconds: durationSec\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        416
+      ],
+      "id": "2e34af83-9a62-40c2-9ffa-f510ccf51abc",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "collection": "news",
+        "collectionFields": {
+          "fields": {
+            "field": [
+              {
+                "name": "source_id",
+                "value": "={{ $('Для каждой новости').first().json.source_db_id }}"
+              },
+              {
+                "name": "news_url",
+                "value": "={{ $('Для каждой новости').first().json.originalItem.link }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $('Для каждой новости').first().json.originalItem.title }}"
+              },
+              {
+                "name": "content",
+                "value": "={{ $('Code in JavaScript6').first().json['content:encoded'] }}"
+              },
+              {
+                "name": "content_clean",
+                "value": "={{ $('Code in JavaScript3').first().json.clean_content }}"
+              },
+              {
+                "name": "summary_ai",
+                "value": "={{ $('Превращаем ответ ai агента в JSON объект').item.json.news_data.summary }}"
+              },
+              {
+                "name": "publication_date",
+                "value": "={{ $json.pub_date.toString() }}"
+              },
+              {
+                "name": "material_author",
+                "value": "={{ $('Для каждой новости').first().json.originalItem.creator }}"
+              },
+              {
+                "name": "processed_at",
+                "value": "={{ new Date().toISOString() }}"
+              },
+              {
+                "name": "relevance_score",
+                "value": "={{ $('Превращаем ответ ai агента в JSON объект').first().json.relevance_score }}"
+              },
+              {
+                "name": "is_arctic",
+                "value": "={{$('Превращаем ответ ai агента в JSON объект').first().json.is_arctic}}"
+              },
+              {
+                "name": "tokens_used",
+                "value": "={{ $('AI Agent').item.json.total_tokens }}"
+              },
+              {
+                "name": "processing_time",
+                "value": "={{ $('AI Agent').item.json.execution_time_seconds }}"
+              },
+              {
+                "name": "relevance_score",
+                "value": "={{ $json.relevance_score }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        640
+      ],
+      "id": "5c17e7f3-79fd-4137-91cc-808be2d81770",
+      "name": "Создаем запись о новости11",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "collection": "digests",
+        "collectionFields": {
+          "fields": {
+            "field": [
+              {
+                "name": "summary_ai",
+                "value": "={{ $json.summary }}"
+              },
+              {
+                "name": "digest_type",
+                "value": "=daily"
+              },
+              {
+                "name": "title",
+                "value": "={{ $json.title }}"
+              },
+              {
+                "name": "period_start",
+                "value": "={{ $('Code in JavaScript9').item.json.periodStart }}"
+              },
+              {
+                "name": "period_end",
+                "value": "={{ $('Code in JavaScript9').item.json.periodEnd }}"
+              },
+              {
+                "name": "news_count",
+                "value": "={{ $('Code in JavaScript9').item.json.count }}"
+              },
+              {
+                "name": "avg_score",
+                "value": "={{ $('Code in JavaScript9').item.json.averageScore }}"
+              },
+              {
+                "name": "tokens_used",
+                "value": "={{ $('HTTP Request4').item.json.usage.total_tokens }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        16
+      ],
+      "id": "3ff585d0-5b4d-4893-bbc6-6e6efca52548",
+      "name": "Create an item2",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "poolside/laguna-m.1:free"
+            },
+            {
+              "name": "messages.0.role",
+              "value": "=system"
+            },
+            {
+              "name": "messages.0.content",
+              "value": "={{ $json.systemPrompt }}"
+            },
+            {
+              "name": "messages.1.role",
+              "value": "user"
+            },
+            {
+              "name": "messages.1.content",
+              "value": "={{ $json.userMessage }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        16
+      ],
+      "id": "2675be1d-42af-4193-8bf2-f5f14198d4a2",
+      "name": "HTTP Request4",
+      "credentials": {
+        "openRouterApi": {
+          "id": "8rkYSSU41p39oirf",
+          "name": "OpenRouter account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем новости из ноды с топ-10 новостей\nconst newsItems = $('Получаем новости за сегодня').all();\n\n// Собираем все summary_ai\nconst summaries = newsItems.map(item => item.json.summary_ai);\n\n// Собираем все score и преобразуем в числа\nconst scores = newsItems.map(item => parseFloat(item.json.score));\nconst averageScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;\n\n// Собираем все publication_date и находим самую раннюю и самую позднюю\nconst publicationDates = newsItems.map(item => new Date(item.json.publication_date));\nconst periodStart = new Date(Math.min(...publicationDates));\nconst periodEnd = new Date(Math.max(...publicationDates));\n\nreturn [{\n  json: {\n    count: newsItems.length,\n    allSummaries: summaries.join('\\n\\n---\\n\\n'),\n    averageScore: parseFloat(averageScore.toFixed(2)),\n    periodStart: periodStart.toISOString(),\n    periodEnd: periodEnd.toISOString(),\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        16
+      ],
+      "id": "00d23bee-bfd3-47c6-86c7-f65e89138c4f",
+      "name": "Code in JavaScript9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Формируем подробный системный промпт со всеми правилами\nconst systemPrompt = `Ты получаешь на вход несколько кратких саммари новостей (allSummaries). Твоя задача — создать ОДИН общий, связный дайджест на русском языке, который объединяет ключевые темы и тренды из всех новостей.\n\nПравила:\n1. Проанализируй все предоставленные саммари\n2. Выдели 3-5 основных тем или трендов\n3. Напиши общий дайджест объёмом до 300 символов\n4. Дай заголовок дайджесту\n5. Верни результат ТОЛЬКО в виде валидного JSON, без лишнего текста до или после\n\nФормат JSON:\n{\n  \"title\": \"Заголовок дайджеста\",\n  \"summary\": \"Полный текст общего дайджеста с связным изложением всех ключевых новостей\"\n}\n\nВажно: \n- Используй только русский язык\n- Не добавляй пояснений вне JSON\n- Убедись, что JSON валидный\n- Сохраняй фактологическую точность из исходных summary`;\n\n// 2. Получаем данные из предыдущей ноды (где был ваш объект с count и allSummaries)\n// Предполагаем, что предыдущая нода вернула массив с объектом\nconst previousData = $input.first().json;\n\n// 3. Извлекаем нужные поля\nconst count = previousData.count;\nconst allSummaries = previousData.allSummaries;\n\n// 4. Формируем сообщение для пользователя\nconst userMessage = `Всего новостей: ${count}\\n\\nСаммари новостей:\\n${allSummaries}`;\n\n// 5. Замеряем время старта перед отправкой запроса\nconst startTimeMs = Date.now();\n\n// 6. Передаем переменные дальше в HTTP Request (ноду OpenAI/HTTP)\nreturn [{\n  json: {\n    systemPrompt: systemPrompt,\n    userMessage: userMessage,\n    startTimeMs: startTimeMs,\n    // Дополнительно передаём исходные данные на всякий случай\n    count: count,\n    allSummaries: allSummaries\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        16
+      ],
+      "id": "72fdb084-69e5-4cf1-859c-1967fd782cf3",
+      "name": "Code in JavaScript26"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем ответ от AI ноды\nconst aiResponse = $input.first().json;\n\n// Извлекаем content из ответа AI\nconst content = aiResponse.choices[0].message.content;\n\n// Очищаем content от лишних символов (переносы строк, пробелы в начале/конце)\nconst cleanedContent = content.trim();\n\n// Парсим JSON из строки\nlet parsedResult;\ntry {\n  // Пробуем распарсить напрямую\n  parsedResult = JSON.parse(cleanedContent);\n} catch (e) {\n  // Если не получилось, пробуем найти JSON внутри текста\n  const jsonMatch = cleanedContent.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    parsedResult = JSON.parse(jsonMatch[0]);\n  } else {\n    throw new Error('Не удалось извлечь JSON из ответа AI');\n  }\n}\n\n// Возвращаем результат в красивом формате\nreturn [{\n  json: {\n    title: parsedResult.title,\n    summary: parsedResult.summary,\n    // Дополнительно: длина саммари для контроля\n    summaryLength: parsedResult.summary.length,\n    // Можно добавить timestamp\n    generatedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        16
+      ],
+      "id": "e4458d76-4419-48c6-8b00-b182ee03996b",
+      "name": "Code in JavaScript27"
+    },
+    {
+      "parameters": {
+        "collection": "digest_news",
+        "collectionFields": {
+          "fields": {
+            "field": [
+              {
+                "name": "digest_id",
+                "value": "={{ $json.digest_id }}"
+              },
+              {
+                "name": "news_id",
+                "value": "={{ $json.news_id }}"
+              },
+              {
+                "name": "position",
+                "value": "={{ $json.position }}"
+              },
+              {
+                "name": "score_snapshot",
+                "value": "={{ $json.score }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        16
+      ],
+      "id": "427ed462-f290-433c-8e3e-8aa74672cdc2",
+      "name": "Create an item7",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем созданную запись из предыдущей ноды\nconst createdDigest = $input.first().json;\n\n// Извлекаем ID (название поля может быть \"id\", \"digest_id\" или другое)\nconst digestId = createdDigest.id || createdDigest.digest_id;\n\nreturn [{\n  json: {\n    digestId: digestId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        16
+      ],
+      "id": "97819667-c265-41fe-8bbb-e8714b49e1c8",
+      "name": "Code in JavaScript28"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем ID созданного дайджеста\nconst digestData = $('Code in JavaScript28').first().json;\nconst digestId = digestData.digestId;\n\n// Получаем исходные новости\nconst newsItems = $('Получаем новости за сегодня').all();\n\n// Преобразуем в массив объектов с нужными полями\nconst newsWithScores = newsItems.map((item, originalIndex) => ({\n  id: item.json.id,\n  score: parseFloat(item.json.score),\n  originalIndex: originalIndex  // сохраняем порядок поступления для tie-breaker\n}));\n\n// Сортируем по score (по убыванию) и при одинаковом score - по originalIndex\nnewsWithScores.sort((a, b) => {\n  if (a.score !== b.score) {\n    return b.score - a.score;  // больший score выше\n  }\n  return a.originalIndex - b.originalIndex;  // при равенстве - как пришли\n});\n\n// Создаём карту позиций: id новости -> позиция (начиная с 1)\nconst positionMap = new Map();\nnewsWithScores.forEach((item, index) => {\n  positionMap.set(item.id, index + 1);\n});\n\n// Создаём массив связей для каждой новости с добавлением position\nconst relations = newsItems.map(item => ({\n  json: {\n    digest_id: digestId,\n    news_id: item.json.id,\n    score: item.json.score,  // оригинальный score как строка\n    position: positionMap.get(item.json.id)  // позиция от 1 до N\n  }\n}));\n\nreturn relations;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        16
+      ],
+      "id": "dc7fddd2-f44a-476c-9886-d8e6ded6cc55",
+      "name": "Code in JavaScript29"
+    },
+    {
+      "parameters": {
+        "collection": "digests",
+        "collectionFields": {
+          "fields": {
+            "field": [
+              {
+                "name": "summary_ai",
+                "value": "={{ $json.summary }}"
+              },
+              {
+                "name": "digest_type",
+                "value": "=weekly"
+              },
+              {
+                "name": "title",
+                "value": "={{ $json.title }}"
+              },
+              {
+                "name": "period_start",
+                "value": "={{ $('Code in JavaScript30').item.json.periodStart }}"
+              },
+              {
+                "name": "period_end",
+                "value": "={{ $('Code in JavaScript30').item.json.periodEnd }}"
+              },
+              {
+                "name": "news_count",
+                "value": "={{ $('Code in JavaScript30').item.json.count }}"
+              },
+              {
+                "name": "avg_score",
+                "value": "={{ $('Code in JavaScript30').item.json.averageScore }}"
+              },
+              {
+                "name": "tokens_used",
+                "value": "={{ $('HTTP Request9').item.json.usage.total_tokens }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        208
+      ],
+      "id": "7cc034b4-38ca-48a4-b1c1-2cc94514e466",
+      "name": "Create an item8",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "poolside/laguna-m.1:free"
+            },
+            {
+              "name": "messages.0.role",
+              "value": "=system"
+            },
+            {
+              "name": "messages.0.content",
+              "value": "={{ $json.systemPrompt }}"
+            },
+            {
+              "name": "messages.1.role",
+              "value": "user"
+            },
+            {
+              "name": "messages.1.content",
+              "value": "={{ $json.userMessage }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        208
+      ],
+      "id": "8bc39ba8-e6c7-4508-a908-12b3bd1a113e",
+      "name": "HTTP Request9",
+      "credentials": {
+        "openRouterApi": {
+          "id": "r7G6TCip8hjHZmW0",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем данные из ноды с топ-10 новостей (замените на правильное имя)\nconst newsItems = $('Получаем новости за текущую неделю').all(); // или weekly_news_feed\n\n// Если данные не приходят, проверьте имена нод\nif (!newsItems || newsItems.length === 0) {\n    throw new Error('Не удалось получить новости из ноды Execute a SQL query');\n}\n\n// Собираем все summary_ai\nconst summaries = newsItems.map(item => item.json.summary_ai);\n\n// Собираем все score и преобразуем в числа\nconst scores = newsItems.map(item => parseFloat(item.json.score));\nconst averageScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;\n\n// Собираем все publication_date и находим самую раннюю\nconst publicationDates = newsItems\n    .map(item => item.json.publication_date)\n    .filter(date => date) // убираем null/undefined\n    .map(date => new Date(date))\n    .filter(date => !isNaN(date.getTime()));\n\nif (publicationDates.length === 0) {\n    throw new Error('Нет валидных publication_date для обработки');\n}\n\nconst earliestDate = new Date(Math.min(...publicationDates));\n\n// Функция для получения понедельника недели (начало недели)\nfunction getMonday(date) {\n    const d = new Date(date);\n    const day = d.getDay();\n    const diff = (day === 0 ? 6 : day - 1);\n    d.setDate(d.getDate() - diff);\n    d.setHours(0, 0, 0, 0);\n    return d;\n}\n\n// Функция для получения воскресенья недели (конец недели)\nfunction getSunday(monday) {\n    const d = new Date(monday);\n    d.setDate(d.getDate() + 6);\n    d.setHours(23, 59, 59, 999);\n    return d;\n}\n\n// Вычисляем понедельник и воскресенье для недели самой ранней новости\nconst periodStart = getMonday(earliestDate);\nconst periodEnd = getSunday(periodStart);\n\n// Получаем решение о создании из предыдущей ноды\nconst decision = $input.first().json;\n\nreturn [{\n    json: {\n        // Данные для создания дайджеста\n        count: newsItems.length,\n        allSummaries: summaries.join('\\n\\n---\\n\\n'),\n        averageScore: parseFloat(averageScore.toFixed(2)),\n        periodStart: periodStart.toISOString(),\n        periodEnd: periodEnd.toISOString(),\n        earliestNewsDate: earliestDate.toISOString(),\n        // Данные о решении\n        shouldCreate: decision.shouldCreate,\n        existingDigestId: decision.existingDigestId,\n        currentNewsIds: decision.currentNewsIds,\n        action: decision.action\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        208
+      ],
+      "id": "4501601d-046e-465b-8738-f590e0d95db7",
+      "name": "Code in JavaScript30"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Формируем подробный системный промпт со всеми правилами\nconst systemPrompt = `Ты получаешь на вход несколько кратких саммари новостей (allSummaries). Твоя задача — создать ОДИН общий, связный дайджест на русском языке, который объединяет ключевые темы и тренды из всех новостей.\n\nПравила:\n1. Проанализируй все предоставленные саммари\n2. Выдели 3-5 основных тем или трендов\n3. Напиши общий дайджест объёмом до 300 символов\n4. Дай заголовок дайджесту\n5. Верни результат ТОЛЬКО в виде валидного JSON, без лишнего текста до или после\n\nФормат JSON:\n{\n  \"title\": \"Заголовок дайджеста\",\n  \"summary\": \"Полный текст общего дайджеста с связным изложением всех ключевых новостей\"\n}\n\nВажно: \n- Используй только русский язык\n- Не добавляй пояснений вне JSON\n- Убедись, что JSON валидный\n- Сохраняй фактологическую точность из исходных summary`;\n\n// 2. Получаем данные из предыдущей ноды (где был ваш объект с count и allSummaries)\n// Предполагаем, что предыдущая нода вернула массив с объектом\nconst previousData = $input.first().json;\n\n// 3. Извлекаем нужные поля\nconst count = previousData.count;\nconst allSummaries = previousData.allSummaries;\n\n// 4. Формируем сообщение для пользователя\nconst userMessage = `Всего новостей: ${count}\\n\\nСаммари новостей:\\n${allSummaries}`;\n\n// 5. Замеряем время старта перед отправкой запроса\nconst startTimeMs = Date.now();\n\n// 6. Передаем переменные дальше в HTTP Request (ноду OpenAI/HTTP)\nreturn [{\n  json: {\n    systemPrompt: systemPrompt,\n    userMessage: userMessage,\n    startTimeMs: startTimeMs,\n    // Дополнительно передаём исходные данные на всякий случай\n    count: count,\n    allSummaries: allSummaries\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        208
+      ],
+      "id": "3c710ac3-2215-44a9-b7b5-660ab3654e00",
+      "name": "Code in JavaScript31"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем ответ от AI ноды\nconst aiResponse = $input.first().json;\n\n// Извлекаем content из ответа AI\nconst content = aiResponse.choices[0].message.content;\n\n// Очищаем content от лишних символов (переносы строк, пробелы в начале/конце)\nconst cleanedContent = content.trim();\n\n// Парсим JSON из строки\nlet parsedResult;\ntry {\n  // Пробуем распарсить напрямую\n  parsedResult = JSON.parse(cleanedContent);\n} catch (e) {\n  // Если не получилось, пробуем найти JSON внутри текста\n  const jsonMatch = cleanedContent.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    parsedResult = JSON.parse(jsonMatch[0]);\n  } else {\n    throw new Error('Не удалось извлечь JSON из ответа AI');\n  }\n}\n\n// Возвращаем результат в красивом формате\nreturn [{\n  json: {\n    title: parsedResult.title,\n    summary: parsedResult.summary,\n    // Дополнительно: длина саммари для контроля\n    summaryLength: parsedResult.summary.length,\n    // Можно добавить timestamp\n    generatedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        208
+      ],
+      "id": "70fb3205-c727-4813-b4b1-3a1a0785f6d8",
+      "name": "Code in JavaScript32"
+    },
+    {
+      "parameters": {
+        "collection": "digest_news",
+        "collectionFields": {
+          "fields": {
+            "field": [
+              {
+                "name": "digest_id",
+                "value": "={{ $json.digest_id }}"
+              },
+              {
+                "name": "news_id",
+                "value": "={{ $json.news_id }}"
+              },
+              {
+                "name": "position",
+                "value": "={{ $json.position }}"
+              },
+              {
+                "name": "score_snapshot",
+                "value": "={{ $json.score }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        208
+      ],
+      "id": "34e8b6d1-b033-4c06-b43d-cc92c4bfaac8",
+      "name": "Create an item9",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем созданную запись из предыдущей ноды\nconst createdDigest = $input.first().json;\n\n// Извлекаем ID (название поля может быть \"id\", \"digest_id\" или другое)\nconst digestId = createdDigest.id || createdDigest.digest_id;\n\nreturn [{\n  json: {\n    digestId: digestId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        208
+      ],
+      "id": "6e162e9f-566f-4b5a-b879-ffa78bf437cf",
+      "name": "Code in JavaScript33"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем ID созданного дайджеста\nconst digestData = $('Code in JavaScript33').first().json;\nconst digestId = digestData.digestId;\n\n// Получаем исходные новости\nconst newsItems = $('Получаем новости за текущую неделю').all();\n\n// Преобразуем в массив объектов с нужными полями\nconst newsWithScores = newsItems.map((item, originalIndex) => ({\n  id: item.json.id,\n  score: parseFloat(item.json.score),\n  originalIndex: originalIndex  // сохраняем порядок поступления для tie-breaker\n}));\n\n// Сортируем по score (по убыванию) и при одинаковом score - по originalIndex\nnewsWithScores.sort((a, b) => {\n  if (a.score !== b.score) {\n    return b.score - a.score;  // больший score выше\n  }\n  return a.originalIndex - b.originalIndex;  // при равенстве - как пришли\n});\n\n// Создаём карту позиций: id новости -> позиция (начиная с 1)\nconst positionMap = new Map();\nnewsWithScores.forEach((item, index) => {\n  positionMap.set(item.id, index + 1);\n});\n\n// Создаём массив связей для каждой новости с добавлением position\nconst relations = newsItems.map(item => ({\n  json: {\n    digest_id: digestId,\n    news_id: item.json.id,\n    score: item.json.score,  // оригинальный score как строка\n    position: positionMap.get(item.json.id)  // позиция от 1 до N\n  }\n}));\n\nreturn relations;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        208
+      ],
+      "id": "14478f37-9f82-4202-a2b6-129a8bfa561e",
+      "name": "Code in JavaScript34"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Проверяем, есть ли уже дневной дайджест за сегодня\nSELECT \n    d.id as digest_id,\n    ARRAY_AGG(dn.news_id) as news_ids\nFROM digests d\nLEFT JOIN digest_news dn ON dn.digest_id = d.id\nWHERE DATE(d.created_at) = CURRENT_DATE\n  AND d.digest_type = 'daily'\nGROUP BY d.id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -576,
+        32
+      ],
+      "id": "8530d54d-ec2e-4d1c-960c-5f8a3a17d1d9",
+      "name": "Поиск дневного дайджеста по сегодняшней дате",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AlsEHuwQ0l3ndR5B",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "436a7128-4efa-4c1e-ab0d-6162c5adaf44",
+              "leftValue": "={{ $json.needCreate }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        32
+      ],
+      "id": "39af0290-ff02-4c84-a6a3-f9e2e02b6309",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Проверяем, есть ли уже недельный дайджест за текущую неделю (понедельник - воскресенье)\n-- Ищем точное совпадение с датами понедельника и воскресенья\nSELECT \n    d.id as digest_id,\n    ARRAY_AGG(dn.news_id) as news_ids\nFROM digests d\nLEFT JOIN digest_news dn ON dn.digest_id = d.id\nWHERE DATE(d.period_start) = DATE_TRUNC('week', CURRENT_DATE)::DATE\n  AND DATE(d.period_end) = (DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '6 days')::DATE\n  AND d.digest_type = 'weekly'\nGROUP BY d.id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -576,
+        224
+      ],
+      "id": "20c23bb5-8721-4844-8c42-150ef70cd50f",
+      "name": "Поиск недельного дайджеста по текущей неделе",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AlsEHuwQ0l3ndR5B",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем новости из предыдущей ноды (10 новостей за неделю)\nconst newsItems = $('Получаем новости за текущую неделю').all();\nconst currentNewsIds = newsItems.map(item => item.json.id).sort((a, b) => a - b);\n\n// Получаем существующий недельный дайджест\nconst existingDigest = $('Поиск недельного дайджеста по текущей неделе').first().json;\n\n// Проверяем, существует ли дайджест\nlet existingDigestId = null;\nlet needCreate = true;\n\nif (existingDigest && existingDigest.digest_id) {\n    existingDigestId = existingDigest.digest_id;\n    const existingNewsIds = existingDigest.news_ids || [];\n    existingNewsIds.sort((a, b) => a - b);\n    \n    // Сравниваем массивы новостей\n    const isSameNews = currentNewsIds.length === existingNewsIds.length &&\n                       currentNewsIds.every((id, index) => id === existingNewsIds[index]);\n    \n    if (isSameNews) {\n        needCreate = false; // Новости те же - ничего не делаем\n    } else {\n        needCreate = true; // Новости разные - удалим старый и создадим новый\n    }\n}\n\nreturn [{\n    json: {\n        needCreate: needCreate,\n        existingDigestId: existingDigestId,\n        currentNewsIds: currentNewsIds,\n        action: needCreate ? (existingDigestId ? 'replace' : 'create') : 'skip'\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        224
+      ],
+      "id": "3561d108-f7e1-48b6-9952-ecb3baa1f9eb",
+      "name": "Code in JavaScript35"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "436a7128-4efa-4c1e-ab0d-6162c5adaf44",
+              "leftValue": "={{ $json.needCreate }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        224
+      ],
+      "id": "559d28af-f50c-4dac-9a05-3c98b4e396f1",
+      "name": "If4"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    dnf.id,\n    dnf.title,\n    dnf.slug,\n    LEFT(dnf.content_clean, 300) as preview,\n    dnf.news_url,\n    dnf.publication_date,\n    dnf.relevance_score,\n    dnf.source_name,\n    dnf.source_rating,\n    dnf.likes,\n    dnf.dislikes,\n    dnf.freshness,\n    dnf.score,\n    n.summary_ai -- Добавляем поле из таблицы news\nFROM daily_news_feed dnf\n-- Объединяем таблицы. Замените dnf.id на dnf.news_id, если связь идет через другое поле\nLEFT JOIN news n ON dnf.id = n.id \nWHERE dnf.score >= 60\nORDER BY dnf.score DESC\nLIMIT 10;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -768,
+        32
+      ],
+      "id": "89b4efdc-a477-4249-a9e9-99dbf0d8da1f",
+      "name": "Получаем новости за сегодня",
+      "credentials": {
+        "postgres": {
+          "id": "AlsEHuwQ0l3ndR5B",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    wnf.id,\n    wnf.title,\n    wnf.slug,\n    LEFT(wnf.content_clean, 300) as preview,\n    wnf.news_url,\n    wnf.publication_date,\n    wnf.relevance_score,\n    wnf.source_name,\n    wnf.source_rating,\n    wnf.likes,\n    wnf.dislikes,\n    wnf.freshness,\n    wnf.score,\n    n.summary_ai\nFROM weekly_news_feed wnf\nLEFT JOIN news n ON wnf.id = n.id \nWHERE wnf.score >= 60\n  AND wnf.publication_date >= DATE_TRUNC('week', CURRENT_DATE)\n  AND wnf.publication_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days'\nORDER BY wnf.score DESC\nLIMIT 10;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -768,
+        224
+      ],
+      "id": "b0955661-e690-40e4-ac54-b2437739646a",
+      "name": "Получаем новости за текущую неделю",
+      "credentials": {
+        "postgres": {
+          "id": "AlsEHuwQ0l3ndR5B",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем решение из предыдущей ноды\nconst decision = $input.first().json;\n\n// Если есть существующий дайджест, помечаем его для удаления\nconst shouldDelete = decision.existingDigestId !== null && decision.needCreate === true;\n\nreturn [{\n    json: {\n        shouldDelete: shouldDelete,\n        existingDigestId: decision.existingDigestId,\n        currentNewsIds: decision.currentNewsIds,\n        action: decision.action\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        16
+      ],
+      "id": "138cc78e-8db7-4b70-b679-5b1b73287b1f",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем новости из предыдущей ноды (10 новостей)\nconst newsItems = $('Получаем новости за сегодня').all();\nconst currentNewsIds = newsItems.map(item => item.json.id).sort((a, b) => a - b);\n\n// Получаем существующий дайджест за сегодня\nconst existingDigest = $('Поиск дневного дайджеста по сегодняшней дате').first().json;\n\n// Проверяем, существует ли дайджест\nlet existingDigestId = null;\nlet needCreate = true;\n\nif (existingDigest && existingDigest.digest_id) {\n    existingDigestId = existingDigest.digest_id;\n    const existingNewsIds = existingDigest.news_ids || [];\n    existingNewsIds.sort((a, b) => a - b);\n    \n    // Сравниваем массивы новостей\n    const isSameNews = currentNewsIds.length === existingNewsIds.length &&\n                       currentNewsIds.every((id, index) => id === existingNewsIds[index]);\n    \n    if (isSameNews) {\n        needCreate = false; // Новости те же - ничего не делаем\n    } else {\n        needCreate = true; // Новости разные - удалим старый и создадим новый\n    }\n}\n\nreturn [{\n    json: {\n        needCreate: needCreate,\n        existingDigestId: existingDigestId,\n        currentNewsIds: currentNewsIds,\n        action: needCreate ? (existingDigestId ? 'replace' : 'create') : 'skip'\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        32
+      ],
+      "id": "a3771ce2-d489-4f4a-a978-b1e3858a6823",
+      "name": "sadasd"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Удаляем связи дайджеста с новостями\nDELETE FROM digest_news WHERE digest_id = {{$json.existingDigestId}};\n\n-- Удаляем сам дайджест\nDELETE FROM digests WHERE id = {{$json.existingDigestId}};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        176,
+        16
+      ],
+      "id": "c9334f79-b635-4622-b118-b3ede1b917d9",
+      "name": "Execute a SQL query",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AlsEHuwQ0l3ndR5B",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -944,
+        32
+      ],
+      "id": "86aed9d8-06d1-46b8-ad6c-98e6508e60fa",
+      "name": "Запускаем каждый час3"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -944,
+        224
+      ],
+      "id": "0eb9e8a2-fee9-46b1-a9db-96cca7854a65",
+      "name": "Запускаем каждый час4"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем решение из предыдущей ноды\nconst decision = $input.first().json;\n\n// Если есть существующий дайджест, помечаем его для удаления\nconst shouldDelete = decision.existingDigestId !== null && decision.needCreate === true;\n\nreturn [{\n    json: {\n        shouldDelete: shouldDelete,\n        existingDigestId: decision.existingDigestId,\n        currentNewsIds: decision.currentNewsIds,\n        action: decision.action,\n        digestType: 'weekly'\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ],
+      "id": "7fdf3e6e-34aa-4163-a254-06b4c8feebda",
+      "name": "Code in JavaScript25"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Удаляем связи дайджеста с новостями\nDELETE FROM digest_news WHERE digest_id = {{$json.existingDigestId}};\n\n-- Удаляем сам дайджест\nDELETE FROM digests WHERE id = {{$json.existingDigestId}};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        176,
+        208
+      ],
+      "id": "41597368-21fe-472f-b7f1-c7ee5382a2cb",
+      "name": "Execute a SQL query2",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AlsEHuwQ0l3ndR5B",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем текущую новость по ссылке на ноду \"Для каждой новости3\"\nconst newsItem = $('Для каждой новости').item.json;\n\n// Получаем HTML из новости\nlet html = newsItem['content:encoded'] || newsItem.content || '';\n\n// Функция для декодирования HTML-сущностей\nfunction decodeHtmlEntities(text) {\n  const entities = {\n    '&nbsp;': ' ',\n    '&amp;': '&',\n    '&lt;': '<',\n    '&gt;': '>',\n    '&quot;': '\"',\n    '&#39;': \"'\",\n    '&#x27;': \"'\",\n    '&#x2F;': '/',\n    '&#8211;': '–',\n    '&#8212;': '—',\n    '&#8216;': \"'\",\n    '&#8217;': \"'\",\n    '&#8220;': '\"',\n    '&#8221;': '\"',\n    '&#8230;': '...',\n    '&mdash;': '—',\n    '&ldquo;': '\"',\n    '&rdquo;': '\"',\n    '&lsquo;': \"'\",\n    '&rsquo;': \"'\",\n    '&hellip;': '...'\n  };\n  \n  return text.replace(/&[#\\w]+;/g, function(match) {\n    return entities[match] || match;\n  });\n}\n\n// Очищаем HTML более эффективно\nlet cleanText = html\n  // Удаляем скрипты и стили полностью\n  .replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '')\n  .replace(/<style\\b[^<]*(?:(?!<\\/style>)<[^<]*)*<\\/style>/gi, '')\n  // Удаляем все теги head, meta, link\n  .replace(/<head\\b[^<]*(?:(?!<\\/head>)<[^<]*)*<\\/head>/gi, '')\n  .replace(/<meta[^>]*>/gi, '')\n  .replace(/<link[^>]*>/gi, '')\n  // Заменяем блочные теги на переносы строк\n  .replace(/<p[^>]*>/gi, '')\n  .replace(/<\\/p>/gi, '\\n\\n')\n  .replace(/<br\\s*\\/?>/gi, '\\n')\n  .replace(/<div[^>]*>/gi, '')\n  .replace(/<\\/div>/gi, '\\n')\n  .replace(/<h[1-6][^>]*>/gi, '')\n  .replace(/<\\/h[1-6]>/gi, '\\n\\n')\n  .replace(/<li[^>]*>/gi, '  • ')\n  .replace(/<\\/li>/gi, '\\n')\n  .replace(/<ul[^>]*>/gi, '\\n')\n  .replace(/<\\/ul>/gi, '\\n')\n  .replace(/<ol[^>]*>/gi, '\\n')\n  .replace(/<\\/ol>/gi, '\\n')\n  .replace(/<tr[^>]*>/gi, '')\n  .replace(/<\\/tr>/gi, '\\n')\n  .replace(/<td[^>]*>/gi, '')\n  .replace(/<\\/td>/gi, ' | ')\n  .replace(/<th[^>]*>/gi, '')\n  .replace(/<\\/th>/gi, ' | ')\n  .replace(/<table[^>]*>/gi, '\\n')\n  .replace(/<\\/table>/gi, '\\n')\n  // Удаляем все остальные HTML теги\n  .replace(/<[^>]*>/g, '')\n  // Удаляем HTML комментарии\n  .replace(/<!--[\\s\\S]*?-->/g, '')\n  // Удаляем CSS и JS блоки (запасной вариант)\n  .replace(/{[\\s\\S]*?}/g, '')\n  // Удаляем лишние пробелы в начале строк\n  .replace(/^[ \\t]+/gm, '')\n  // Декодируем HTML сущности\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&amp;/g, '&')\n  .replace(/&lt;/g, '<')\n  .replace(/&gt;/g, '>')\n  .replace(/&quot;/g, '\"')\n  .replace(/&#39;/g, \"'\")\n  .replace(/&#x27;/g, \"'\")\n  .replace(/&#8211;/g, '–')\n  .replace(/&#8212;/g, '—')\n  .replace(/&#8216;/g, \"'\")\n  .replace(/&#8217;/g, \"'\")\n  .replace(/&#8220;/g, '\"')\n  .replace(/&#8221;/g, '\"')\n  .replace(/&#8230;/g, '...')\n  .replace(/&mdash;/g, '—')\n  .replace(/&ldquo;/g, '\"')\n  .replace(/&rdquo;/g, '\"')\n  .replace(/&lsquo;/g, \"'\")\n  .replace(/&rsquo;/g, \"'\")\n  .replace(/&hellip;/g, '...')\n  // Удаляем множественные переносы строк\n  .replace(/\\n\\s*\\n\\s*\\n/g, '\\n\\n')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  // Удаляем пробелы в конце строк\n  .replace(/[ \\t]+$/gm, '')\n  // Удаляем пустые строки в начале и конце\n  .trim();\n\n// Дополнительная очистка от мусорных строк\nconst lines = cleanText.split('\\n');\nconst filteredLines = lines.filter(line => {\n  const trimmedLine = line.trim();\n  // Пропускаем пустые строки и строки с мусором\n  if (trimmedLine.length === 0) return false;\n  if (trimmedLine === '|') return false;\n  if (trimmedLine.match(/^[\\s|]+$/)) return false;\n  if (trimmedLine.length < 2 && trimmedLine !== '•') return false;\n  return true;\n});\n\ncleanText = filteredLines.join('\\n');\n\n// Декодируем оставшиеся HTML сущности (запасной вариант)\ncleanText = cleanText.replace(/&#(\\d+);/g, function(match, dec) {\n  return String.fromCharCode(dec);\n});\n\n// Удаляем лишние пробелы между словами\ncleanText = cleanText.replace(/\\s{2,}/g, ' ');\n\n// Возвращаем только clean_content\nreturn [{\n  json: {\n    clean_content: cleanText\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        416
+      ],
+      "id": "2c8b40d2-47d5-42e2-acf4-fa448d980a65",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "collection": "news",
+        "collectionFields": {
+          "fields": {
+            "field": [
+              {
+                "name": "source_id",
+                "value": "={{ $('Для каждой новости').first().json.source_db_id }}"
+              },
+              {
+                "name": "news_url",
+                "value": "={{ $('Для каждой новости').first().json.originalItem.link }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $('Для каждой новости').first().json.originalItem.title }}"
+              },
+              {
+                "name": "content",
+                "value": "={{ $('Code in JavaScript6').first().json['content:encoded'] }}"
+              },
+              {
+                "name": "content_clean",
+                "value": "={{ $('Code in JavaScript3').first().json.clean_content }}"
+              },
+              {
+                "name": "summary_ai",
+                "value": "={{ $('Превращаем ответ ai агента в JSON объект').item.json.news_data.summary }}"
+              },
+              {
+                "name": "publication_date",
+                "value": "={{ $json.pub_date.toString() }}"
+              },
+              {
+                "name": "material_author",
+                "value": "={{ $('Для каждой новости').first().json.originalItem.creator }}"
+              },
+              {
+                "name": "processed_at",
+                "value": "={{ new Date().toISOString() }}"
+              },
+              {
+                "name": "relevance_score",
+                "value": "={{ $('Превращаем ответ ai агента в JSON объект').first().json.relevance_score }}"
+              },
+              {
+                "name": "is_arctic",
+                "value": "={{$('Превращаем ответ ai агента в JSON объект').first().json.is_arctic}}"
+              },
+              {
+                "name": "tokens_used",
+                "value": "={{ $('AI Agent').item.json.total_tokens }}"
+              },
+              {
+                "name": "processing_time",
+                "value": "={{ $('AI Agent').item.json.execution_time_seconds }}"
+              },
+              {
+                "name": "relevance_score",
+                "value": "={{ $json.relevance_score }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@directus/n8n-nodes-directus.directus",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        416
+      ],
+      "id": "4db4c34f-018c-4a1c-80dc-c29a6314ed23",
+      "name": "Создаем запись о новости",
+      "credentials": {
+        "directusApi": {
+          "id": "exa39b9jWlKEyxZM",
+          "name": "Directus account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.filter(item => item.json.is_active === true);"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1520,
+        400
+      ],
+      "id": "bc05517b-f849-40dd-a45e-fadad5d58817",
+      "name": "Возвращаем только те ресурсы, что активны"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst validItems = items.filter(item => {\n  const data = item.json;\n  \n  // Если есть поле error — отбрасываем ЛЮБУЮ ошибку\n  if (data.error) {\n    console.log(`Отбрасываем ошибку: ${data.error.substring(0, 100)}...`);\n    return false;\n  }\n  \n  // Если нет контента — отбрасываем\n  const content = data.content || data['content:encoded'] || data.contentSnippet || '';\n  if (!content || content.length < 50) {\n    console.log(`Отбрасываем: нет контента или слишком коротко`);\n    return false;\n  }\n  \n  return true;\n});\n\nreturn validItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        384
+      ],
+      "id": "66546107-13fb-4d50-810e-5951e75746e8",
+      "name": "Отбрасываем ошибки в возврате rss"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst requests = [];\n\nfor (const item of items) {\n  const link = item.json.link;\n  \n  if (link) {\n    requests.push({\n      json: {\n        url: link,\n        // Сохраняем ВСЕ оригинальные RSS-данные\n        originalItem: item.json\n      }\n    });\n  }\n}\n\nreturn requests;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        896
+      ],
+      "id": "bbebf176-9612-4800-bc13-9f012bde40e8",
+      "name": "Отбрасываем ошибки в возврате rss1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rssItems = $('Отбрасываем ошибки в возврате rss1').all();\nconst htmlItems = $input.all();\nconst results = [];\nfunction extractArticleHTML(html) {\n  let cleaned = html\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<nav[\\s\\S]*?<\\/nav>/gi, '')\n    .replace(/<header[\\s\\S]*?<\\/header>/gi, '')\n    .replace(/<footer[\\s\\S]*?<\\/footer>/gi, '')\n    .replace(/<aside[\\s\\S]*?<\\/aside>/gi, '')\n    .replace(/<form[\\s\\S]*?<\\/form>/gi, '')\n    .replace(/<!--[\\s\\S]*?-->/g, '')\n    .replace(/<div[^>]*class=\"[^\"]*sharedaddy[^\"]*\"[\\s\\S]*?<\\/div>\\s*<\\/div>\\s*<\\/div>/gi, '')\n    .replace(/<div[^>]*class=\"[^\"]*addtoany[^\"]*\"[\\s\\S]*?<\\/div>\\s*<\\/div>/gi, '')\n    .replace(/<div[^>]*id=\"jp-relatedposts\"[\\s\\S]*?<\\/div>\\s*<\\/div>/gi, '')\n    .replace(/<div[^>]*class=\"[^\"]*crp_related[^\"]*\"[\\s\\S]*?<\\/div>/gi, '')\n    .replace(/<div[^>]*id=\"comments\"[\\s\\S]*?<\\/div>/gi, '')\n    .replace(/<div[^>]*class=\"[^\"]*comment[^\"]*\"[\\s\\S]*?<\\/div>/gi, '')\n    .replace(/<div[^>]*class=\"[^\"]*udm-inpage[^\"]*\"[\\s\\S]*?<\\/div>/gi, '')\n    .replace(/<table[\\s\\S]*?udm-inpage[\\s\\S]*?<\\/table>/gi, '')\n    .replace(/<div[^>]*style=\"clear:both[\\s\\S]*?<\\/div>/gi, '')\n    .replace(/<div[^>]*class=\"[^\"]*single_postmeta[^\"]*\"[\\s\\S]*?<\\/div>/gi, '')\n    .replace(/<div[^>]*class=\"[^\"]*addtoany_content[^\"]*\"[\\s\\S]*?<\\/div>\\s*<\\/div>/gi, '')\n    // Исправляем относительные пути изображений\n    .replace(/src=\"(\\/sites\\/default\\/files\\/[^\"]+)\"/g, 'src=\"https://nsidc.org$1\"')\n    .replace(/srcset=\"(\\/sites\\/default\\/files\\/[^\"]+)\"/g, 'srcset=\"https://nsidc.org$1\"');\n\n  const contentPatterns = [\n    /<article[\\s\\S]*?<\\/article>/gi,\n    /<[^>]*class=\"[^\"]*\\b(article|post|content|entry|story|body|text|main)\\b[^\"]*\"[\\s\\S]*?<\\/[^>]+>/gi,\n    /<[^>]*id=\"[^\"]*\\b(article|post|content|entry|story|body|text|main)\\b[^\"]*\"[\\s\\S]*?<\\/[^>]+>/gi,\n    /<main[\\s\\S]*?<\\/main>/gi,\n  ];\n\n  let bestBlock = '';\n\n  for (const pattern of contentPatterns) {\n    const matches = cleaned.match(pattern);\n    if (matches) {\n      for (const match of matches) {\n        if (match.length > bestBlock.length) {\n          bestBlock = match;\n        }\n      }\n    }\n  }\n\n  if (bestBlock.length < 200) {\n    bestBlock = cleaned;\n  }\n\n  return `<div class=\"extracted-article\">${bestBlock}</div>`;\n}\n\nfor (let i = 0; i < rssItems.length; i++) {\n  const rssData = rssItems[i].json;\n  const fullHtml = htmlItems[i]?.json?.data || '';\n\n  const articleHtml = extractArticleHTML(fullHtml);\n\n  results.push({\n    json: {\n      ...rssData,\n      'content:encoded': articleHtml,\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        896
+      ],
+      "id": "b0cedc0c-0cd8-44b9-a331-5df80632efa9",
+      "name": "Берем только body с ссылками на изображения и преобразуем ссылки"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Если Directus вернул хотя бы одну запись - дубликат\nif (items.length > 0 && items[0].json && items[0].json.id) {\n  return [{ json: { is_duplicate: true } }];\n}\n\n// Если пусто - новая статья\nreturn [{ json: { is_duplicate: false } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        400
+      ],
+      "id": "3e9fa5dc-9711-43f1-94ef-3efe8dc0a0ca",
+      "name": "Обработка на дубликат новости"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4128,
+        2320
+      ],
+      "id": "a5cf6664-5baf-413e-a65f-8cfc9033fcab",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "Отбрасываем ошибки в возврате rss1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запускаем каждый час": {
+      "main": [
+        [
+          {
+            "node": "Получаем и передаем ссылки сайтов",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем и передаем ссылки сайтов": {
+      "main": [
+        [
+          {
+            "node": "Возвращаем только те ресурсы, что активны",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Превращаем ответ ai агента в JSON объект": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Для каждой новости": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Для каждой ссылки ресурса": {
+      "main": [
+        [
+          {
+            "node": "Отбрасываем ошибки в возврате rss",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ищем по ссылке, есть ли запись новости": {
+      "main": [
+        [
+          {
+            "node": "Обработка на дубликат новости",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Если есть, то возвращаемся назад": {
+      "main": [
+        [
+          {
+            "node": "Для каждой новости",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Подучаем и передаем все теги",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript10": {
+      "main": [
+        [
+          {
+            "node": "Create an item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an item": {
+      "main": [
+        [
+          {
+            "node": "Для каждой новости",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Создаем запись о новости",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Создаем запись о новости11",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подучаем и передаем все теги": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Ищем по ссылке, есть ли запись новости",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Берем только body с ссылками на изображения и преобразуем ссылки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Добавляем id источника": {
+      "main": [
+        [
+          {
+            "node": "Для каждой ссылки ресурса",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript8": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Превращаем ответ ai агента в JSON объект",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Создаем запись о новости11": {
+      "main": [
+        [
+          {
+            "node": "Для каждой новости",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript27",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript9": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript26",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript26": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an item2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript28",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript27": {
+      "main": [
+        [
+          {
+            "node": "Create an item2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript28": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript29",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript29": {
+      "main": [
+        [
+          {
+            "node": "Create an item7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an item8": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript33",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request9": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript32",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript30": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript31",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript31": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript32": {
+      "main": [
+        [
+          {
+            "node": "Create an item8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript33": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript34",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript34": {
+      "main": [
+        [
+          {
+            "node": "Create an item9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Поиск дневного дайджеста по сегодняшней дате": {
+      "main": [
+        [
+          {
+            "node": "sadasd",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Поиск недельного дайджеста по текущей неделе": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript35",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript35": {
+      "main": [
+        [
+          {
+            "node": "If4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript25",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем новости за сегодня": {
+      "main": [
+        [
+          {
+            "node": "Поиск дневного дайджеста по сегодняшней дате",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получаем новости за текущую неделю": {
+      "main": [
+        [
+          {
+            "node": "Поиск недельного дайджеста по текущей неделе",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sadasd": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запускаем каждый час3": {
+      "main": [
+        [
+          {
+            "node": "Получаем новости за сегодня",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запускаем каждый час4": {
+      "main": [
+        [
+          {
+            "node": "Получаем новости за текущую неделю",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript25": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript30",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Создаем запись о новости": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Возвращаем только те ресурсы, что активны": {
+      "main": [
+        [
+          {
+            "node": "Для каждой ссылки ресурса",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отбрасываем ошибки в возврате rss": {
+      "main": [
+        [
+          {
+            "node": "Для каждой новости",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отбрасываем ошибки в возврате rss1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Берем только body с ссылками на изображения и преобразуем ссылки": {
+      "main": [
+        [
+          {
+            "node": "Добавляем id источника",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Обработка на дубликат новости": {
+      "main": [
+        [
+          {
+            "node": "Если есть, то возвращаемся назад",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f10f64fb-1b0d-45ec-b354-895cb30807c3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5388fa3476f163e4dfa98f4da1f4b5363532aeb51bfebd55865b50409d15b2e1"
+  },
+  "id": "vbiGDCjND5zCIt1x",
+  "tags": []
+}
